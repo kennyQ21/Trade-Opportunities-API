@@ -1,0 +1,16 @@
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.6.0
+pydantic-settings>=2.1.0
+openai>=1.0.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+aiohttp>=3.9.0
+python-dotenv>=1.0.0
+tenacity>=8.2.0
+langgraph>=0.2.0
+langchain-core>=0.3.0
+duckduckgo-search>=4.1.0
+gnews>=0.3.7
+streamlit>=1.29.0
+markdown2>=2.4.0
