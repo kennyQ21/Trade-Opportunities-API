@@ -1,235 +1,126 @@
 """
 PDF Generator Utility
 Converts markdown reports to professional PDF documents with citations
+Uses fpdf2 (pure Python - no system dependencies)
 """
-from weasyprint import HTML
+from fpdf import FPDF
 from markdown2 import markdown
 from datetime import datetime
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
 
-def generate_pdf(
-    markdown_body: str,
-    sector: str,
-    sources: list = None,
-    data_summary: dict = None
-) -> bytes:
+class PDFReport(FPDF):
+    """Custom PDF class with header and footer"""
+    
+    def __init__(self, title, sector):
+        super().__init__()
+        self.title_text = title
+        self.sector = sector
+        
+    def header(self):
+        """Page header"""
+        self.set_font('Arial', 'B', 16)
+        self.cell(0, 10, self.title_text, 0, 1, 'C')
+        self.set_font('Arial', 'I', 10)
+        self.cell(0, 5, f'Sector: {self.sector}', 0, 1, 'C')
+        self.ln(5)
+        
+    def footer(self):
+        """Page footer"""
+        self.set_y(-15)
+        self.set_font('Arial', 'I', 8)
+        self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
+
+
+def generate_pdf(markdown_body: str, sector: str, sources: list, data_summary: dict) -> bytes:
     """
-    Generate PDF from markdown report with citations
+    Generate PDF from markdown report
     
     Args:
         markdown_body: Markdown formatted report
         sector: Sector name
-        sources: List of source citations
-        data_summary: Extracted data summary
+        sources: List of source dictionaries
+        data_summary: Summary data dictionary
         
     Returns:
         PDF file as bytes
     """
     try:
-        # Convert markdown to HTML
-        html_content = markdown(
-            markdown_body,
-            extras=[
-                'fenced-code-blocks',
-                'tables',
-                'header-ids',
-                'metadata',
-                'code-friendly'
-            ]
+        # Create PDF
+        pdf = PDFReport(
+            title='Trade Opportunities Analysis',
+            sector=sector.title()
         )
+        pdf.add_page()
+        pdf.set_auto_page_break(auto=True, margin=15)
         
-        # Build sources section HTML
-        sources_html = ""
+        # Add key metrics
+        pdf.set_font('Arial', 'B', 14)
+        pdf.cell(0, 10, 'Key Metrics', 0, 1)
+        pdf.set_font('Arial', '', 11)
+        
+        if data_summary.get('market_size'):
+            pdf.multi_cell(0, 8, f"Market Size: {data_summary['market_size']}")
+        if data_summary.get('growth_cagr'):
+            pdf.multi_cell(0, 8, f"Growth Rate: {data_summary['growth_cagr']}")
+        
+        pdf.ln(5)
+        
+        # Add main content (convert markdown to plain text for PDF)
+        pdf.set_font('Arial', 'B', 14)
+        pdf.cell(0, 10, 'Analysis Report', 0, 1)
+        pdf.set_font('Arial', '', 10)
+        
+        # Simple markdown to text conversion
+        text_content = markdown_body
+        # Remove markdown headers
+        text_content = re.sub(r'^#{1,6}\s+', '', text_content, flags=re.MULTILINE)
+        # Remove markdown bold/italic
+        text_content = re.sub(r'\*\*([^*]+)\*\*', r'\1', text_content)
+        text_content = re.sub(r'\*([^*]+)\*', r'\1', text_content)
+        # Remove markdown links but keep text
+        text_content = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text_content)
+        
+        # Split into paragraphs and add to PDF
+        paragraphs = text_content.split('\n\n')
+        for para in paragraphs:
+            if para.strip():
+                # Handle bullet points
+                if para.strip().startswith('-'):
+                    lines = para.split('\n')
+                    for line in lines:
+                        if line.strip():
+                            pdf.multi_cell(0, 6, line.strip())
+                else:
+                    pdf.multi_cell(0, 6, para.strip())
+                pdf.ln(3)
+        
+        # Add sources
         if sources:
-            sources_html = '<div class="sources"><h2>📚 Sources & Citations</h2><ol>'
-            for idx, source in enumerate(sources, 1):
-                sources_html += f'''
-                <li class="source-item">
-                    <strong>{source.get('title', 'No Title')}</strong><br>
-                    <span class="source-meta">{source.get('source', 'Unknown Source')}</span><br>
-                    <a href="{source.get('url', '#')}" class="source-link">{source.get('url', '#')}</a>
-                </li>
-                '''
-            sources_html += '</ol></div>'
+            pdf.add_page()
+            pdf.set_font('Arial', 'B', 14)
+            pdf.cell(0, 10, 'Sources & Citations', 0, 1)
+            pdf.set_font('Arial', '', 9)
+            
+            for idx, source in enumerate(sources[:10], 1):
+                pdf.set_font('Arial', 'B', 9)
+                pdf.multi_cell(0, 5, f"{idx}. {source.get('title', 'No Title')}")
+                pdf.set_font('Arial', '', 8)
+                pdf.multi_cell(0, 4, f"Source: {source.get('source', 'Unknown')}")
+                pdf.multi_cell(0, 4, f"URL: {source.get('url', 'No URL')}")
+                pdf.ln(2)
         
-        # Build complete HTML document
-        html_document = f'''
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>{sector.title()} - Trade Opportunities Analysis</title>
-            <style>
-                @page {{
-                    size: A4;
-                    margin: 2cm;
-                    @bottom-right {{
-                        content: "Page " counter(page) " of " counter(pages);
-                        font-size: 9pt;
-                        color: #666;
-                    }}
-                }}
-                
-                body {{
-                    font-family: 'Helvetica', 'Arial', sans-serif;
-                    line-height: 1.6;
-                    color: #333;
-                    font-size: 11pt;
-                }}
-                
-                h1 {{
-                    color: #1e3a8a;
-                    font-size: 24pt;
-                    margin-top: 0;
-                    padding-bottom: 10px;
-                    border-bottom: 3px solid #3b82f6;
-                }}
-                
-                h2 {{
-                    color: #1e40af;
-                    font-size: 16pt;
-                    margin-top: 20px;
-                    margin-bottom: 10px;
-                    border-left: 4px solid #3b82f6;
-                    padding-left: 10px;
-                }}
-                
-                h3 {{
-                    color: #1e40af;
-                    font-size: 13pt;
-                    margin-top: 15px;
-                }}
-                
-                ul, ol {{
-                    margin: 10px 0;
-                    padding-left: 25px;
-                }}
-                
-                li {{
-                    margin: 5px 0;
-                }}
-                
-                strong {{
-                    color: #1e40af;
-                }}
-                
-                code {{
-                    background: #f3f4f6;
-                    padding: 2px 6px;
-                    border-radius: 3px;
-                    font-family: 'Courier New', monospace;
-                    font-size: 10pt;
-                }}
-                
-                .cover {{
-                    text-align: center;
-                    padding: 50px 0;
-                    page-break-after: always;
-                }}
-                
-                .cover h1 {{
-                    font-size: 32pt;
-                    border: none;
-                    margin-bottom: 30px;
-                }}
-                
-                .metadata {{
-                    background: #f8fafc;
-                    padding: 15px;
-                    border-radius: 8px;
-                    margin: 20px 0;
-                    border-left: 4px solid #3b82f6;
-                }}
-                
-                .metadata-item {{
-                    margin: 5px 0;
-                    font-size: 10pt;
-                }}
-                
-                .sources {{
-                    page-break-before: always;
-                    margin-top: 30px;
-                }}
-                
-                .source-item {{
-                    margin: 15px 0;
-                    padding: 10px;
-                    background: #f8fafc;
-                    border-radius: 5px;
-                    border-left: 3px solid #3b82f6;
-                }}
-                
-                .source-meta {{
-                    color: #64748b;
-                    font-size: 9pt;
-                    font-style: italic;
-                }}
-                
-                .source-link {{
-                    color: #3b82f6;
-                    text-decoration: none;
-                    font-size: 9pt;
-                    word-break: break-all;
-                }}
-                
-                .summary-box {{
-                    background: #eff6ff;
-                    padding: 15px;
-                    border-radius: 8px;
-                    margin: 20px 0;
-                    border: 2px solid #3b82f6;
-                }}
-                
-                .summary-box h3 {{
-                    margin-top: 0;
-                    color: #1e40af;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="cover">
-                <h1>📊 {sector.title()} Sector</h1>
-                <h2>Trade Opportunities Analysis Report</h2>
-                <div class="metadata">
-                    <div class="metadata-item"><strong>Generated:</strong> {datetime.utcnow().strftime('%B %d, %Y')}</div>
-                    <div class="metadata-item"><strong>Market Focus:</strong> India</div>
-                    <div class="metadata-item"><strong>Report Type:</strong> Comprehensive Market Analysis</div>
-                </div>
-            </div>
-            
-            {f"""
-            <div class="summary-box">
-                <h3>📈 Key Metrics</h3>
-                <ul>
-                    <li><strong>Market Size:</strong> {data_summary.get('market_size', 'Not Available')}</li>
-                    <li><strong>Growth Rate:</strong> {data_summary.get('growth_cagr', 'Not Available')}</li>
-                    <li><strong>Top Recommendations:</strong> {len(data_summary.get('top_recommendations', []))} actionable steps</li>
-                </ul>
-            </div>
-            """ if data_summary else ""}
-            
-            <div class="content">
-                {html_content}
-            </div>
-            
-            {sources_html}
-            
-            <div style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #e5e7eb; text-align: center; font-size: 9pt; color: #64748b;">
-                <p>Trade Opportunities Analysis System | © 2025 | Confidential & Proprietary</p>
-            </div>
-        </body>
-        </html>
-        '''
+        # Generate timestamp
+        pdf.set_font('Arial', 'I', 8)
+        pdf.ln(5)
+        pdf.cell(0, 5, f'Generated on: {datetime.utcnow().strftime("%B %d, %Y at %H:%M UTC")}', 0, 1, 'C')
         
-        # Generate PDF
-        logger.info(f"[PDF] Generating: {sector}")
-        pdf_bytes = HTML(string=html_document).write_pdf()
-        logger.info(f"[PDF] Done ({len(pdf_bytes)} bytes)")
-        return pdf_bytes
+        # Return PDF as bytes
+        return bytes(pdf.output())
         
     except Exception as e:
-        logger.error(f"[PDF] {e}")
+        logger.error(f"PDF generation error: {e}")
         raise
